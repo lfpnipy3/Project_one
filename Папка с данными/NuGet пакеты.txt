@@ -1,0 +1,3 @@
+Install-Package Swashbuckle.AspNetCore
+Install-Package Npgsql.EntityFrameworkCore.PostgreSQL
+Install-Package Konscious.Security.Cryptography.Argon2

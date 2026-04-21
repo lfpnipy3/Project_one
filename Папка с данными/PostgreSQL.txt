@@ -1,0 +1,4 @@
+PostgreSQL 
+Password: JlkpYunGEW0p1_kl1
+Port: 5432
+http://localhost:5234/swagger/index.html
