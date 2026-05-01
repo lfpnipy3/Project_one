@@ -26,6 +26,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "roleId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
           }
         ],
         "responses": {
@@ -65,7 +74,45 @@
         }
       }
     },
-    "/employees": {
+    "/teachers": {
+      "post": {
+        "tags": [
+          "MyAuthServer"
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "pckId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          {
+            "name": "fio",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
       "get": {
         "tags": [
           "MyAuthServer"
@@ -78,7 +125,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Employee"
+                    "$ref": "#/components/schemas/Int32StringInt32<>f__AnonymousType2"
                   }
                 }
               }
@@ -86,51 +133,24 @@
           }
         }
       }
-    },
-    "/employees/{id}": {
-      "delete": {
-        "tags": [
-          "MyAuthServer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int32"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
-      }
     }
   },
   "components": {
     "schemas": {
-      "Employee": {
+      "Int32StringInt32<>f__AnonymousType2": {
         "type": "object",
         "properties": {
-          "id": {
+          "id_Teacher": {
             "type": "integer",
             "format": "int32"
           },
-          "name": {
+          "fio": {
             "type": "string",
             "nullable": true
           },
-          "role": {
-            "type": "string",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "nullable": true
+          "pck_Id": {
+            "type": "integer",
+            "format": "int32"
           }
         },
         "additionalProperties": false
