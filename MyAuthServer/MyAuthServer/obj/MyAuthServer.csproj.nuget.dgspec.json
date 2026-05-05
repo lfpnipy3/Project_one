@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\Mr.DragonShot\\Desktop\\Program's the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj": {}
+    "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj": {}
   },
   "projects": {
-    "C:\\Users\\Mr.DragonShot\\Desktop\\Program's the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj": {
+    "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Mr.DragonShot\\Desktop\\Program's the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj",
+        "projectUniqueName": "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj",
         "projectName": "MyAuthServer",
-        "projectPath": "C:\\Users\\Mr.DragonShot\\Desktop\\Program's the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj",
+        "projectPath": "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\MyAuthServer.csproj",
         "packagesPath": "C:\\Users\\Mr.DragonShot\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Mr.DragonShot\\Desktop\\Program's the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\obj\\",
+        "outputPath": "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
