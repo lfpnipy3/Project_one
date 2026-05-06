@@ -16,7 +16,7 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 var app = builder.Build();
 app.UseCors("AllowAll");
 
-// КЛЮЧ ДЛЯ ШИФРОВАНИЯ
+// КЛЮЧ ДЛЯ ШИФРОВАНИЯ ФИО
 byte[] key = Encoding.UTF8.GetBytes("A67890B234567890C1234567890D1234");
 
 byte[] EncryptFio(string text)
@@ -41,6 +41,21 @@ string DecryptFio(byte[] data)
     return Encoding.UTF8.GetString(result);
 }
 
+// ВСПОМОГАТЕЛЬНЫЙ МЕТОД ДЛЯ ХЕШИРОВАНИЯ ПАРОЛЯ
+async Task<(string hash, string salt)> HashPassword(string password)
+{
+    var salt = RandomNumberGenerator.GetBytes(16);
+    var argon2 = new Argon2id(Encoding.UTF8.GetBytes(password))
+    {
+        Salt = salt,
+        DegreeOfParallelism = 4,
+        Iterations = 2,
+        MemorySize = 1024
+    };
+    var hash = await argon2.GetBytesAsync(16);
+    return (Convert.ToBase64String(hash), Convert.ToBase64String(salt));
+}
+
 // АВТОРИЗАЦИЯ
 app.MapPost("/login", async (string username, string password, AppDbContext db) => {
     var user = await db.Users.FirstOrDefaultAsync(x => x.Username == username);
@@ -54,12 +69,21 @@ app.MapPost("/login", async (string username, string password, AppDbContext db) 
         MemorySize = 1024
     };
     var isOk = Convert.ToBase64String(await argon2.GetBytesAsync(16)) == user.PasswordHash;
-    return isOk ? Results.Ok(new { user.Id, user.Role_Id, user.Pck_Id }) : Results.Unauthorized();
+    return isOk ? Results.Ok(new { user.Id, user.Role_Id, user.Pck_Id, user.CreatedBy }) : Results.Unauthorized();
 });
 
 // ==================== GET ВСЕХ ТАБЛИЦ ====================
 app.MapGet("/roles", async (AppDbContext db) => await db.Roles.ToListAsync());
-app.MapGet("/users", async (AppDbContext db) => await db.Users.ToListAsync());
+app.MapGet("/users", async (AppDbContext db) => {
+    var users = await db.Users.ToListAsync();
+    return users.Select(u => new {
+        u.Id,
+        u.Username,
+        u.Role_Id,
+        u.Pck_Id,
+        u.CreatedBy
+    });
+});
 app.MapGet("/pck", async (AppDbContext db) => await db.PCKs.ToListAsync());
 app.MapGet("/positions", async (AppDbContext db) => await db.Positions.ToListAsync());
 app.MapGet("/degrees", async (AppDbContext db) => await db.Degrees.ToListAsync());
@@ -79,7 +103,10 @@ app.MapGet("/teachers", async (AppDbContext db) => {
         t.PCK_Id,
         t.Position_Id,
         t.Degree_Id,
-        t.Employment_Id
+        t.Employment_Id,
+        t.KN_Number,
+        t.Category,
+        t.Has_Higher_Education
     });
 });
 app.MapGet("/academic-years", async (AppDbContext db) => await db.AcademicYears.ToListAsync());
@@ -88,7 +115,25 @@ app.MapGet("/actual-load", async (AppDbContext db) => await db.ActualLoads.ToLis
 
 // ==================== POST ДОБАВЛЕНИЕ ====================
 app.MapPost("/roles", async (Role item, AppDbContext db) => { db.Roles.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
-app.MapPost("/users", async (User item, AppDbContext db) => { db.Users.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
+
+app.MapPost("/users", async (UserCreateDto dto, AppDbContext db) => {
+    var (hash, salt) = await HashPassword(dto.Password);
+
+    var user = new User
+    {
+        Username = dto.Username,
+        PasswordHash = hash,
+        Salt = salt,
+        Role_Id = dto.Role_Id,
+        Pck_Id = dto.Pck_Id,
+        CreatedBy = dto.CreatedBy
+    };
+
+    db.Users.Add(user);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { user.Id, user.Username, user.Role_Id, user.Pck_Id, user.CreatedBy });
+});
+
 app.MapPost("/pck", async (PCK item, AppDbContext db) => { db.PCKs.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
 app.MapPost("/positions", async (Position item, AppDbContext db) => { db.Positions.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
 app.MapPost("/degrees", async (Degree item, AppDbContext db) => { db.Degrees.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
@@ -107,7 +152,10 @@ app.MapPost("/teachers", async (TeacherDto dto, AppDbContext db) => {
         Fio = EncryptFio(dto.Fio),
         Position_Id = dto.Position_Id,
         Degree_Id = dto.Degree_Id,
-        Employment_Id = dto.Employment_Id
+        Employment_Id = dto.Employment_Id,
+        KN_Number = dto.KN_Number,
+        Category = dto.Category,
+        Has_Higher_Education = dto.Has_Higher_Education
     };
     db.Teachers.Add(teacher);
     await db.SaveChangesAsync();
@@ -126,12 +174,22 @@ app.MapPut("/roles/{id}", async (int id, Role input, AppDbContext db) => {
     return Results.NoContent();
 });
 
-app.MapPut("/users/{id}", async (Guid id, User input, AppDbContext db) => {
+app.MapPut("/users/{id}", async (Guid id, UserUpdateDto input, AppDbContext db) => {
     var item = await db.Users.FindAsync(id);
     if (item == null) return Results.NotFound();
     item.Username = input.Username;
     item.Role_Id = input.Role_Id;
     item.Pck_Id = input.Pck_Id;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/users/{id}/password", async (Guid id, string newPassword, AppDbContext db) => {
+    var item = await db.Users.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    var (hash, salt) = await HashPassword(newPassword);
+    item.PasswordHash = hash;
+    item.Salt = salt;
     await db.SaveChangesAsync();
     return Results.NoContent();
 });
@@ -171,11 +229,80 @@ app.MapPut("/employments/{id}", async (int id, Employment input, AppDbContext db
     return Results.NoContent();
 });
 
+app.MapPut("/specialties/{id}", async (int id, Specialty input, AppDbContext db) => {
+    var item = await db.Specialties.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.Full_Name_Specialty = input.Full_Name_Specialty;
+    item.Short_Name_Specialty = input.Short_Name_Specialty;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/curriculums/{id}", async (int id, Curriculum input, AppDbContext db) => {
+    var item = await db.Curriculums.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.Full_Name_UP = input.Full_Name_UP;
+    item.Short_Name_UP = input.Short_Name_UP;
+    item.Year_Approved = input.Year_Approved;
+    item.Education_Form = input.Education_Form;
+    item.Specialty_Id = input.Specialty_Id;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
 app.MapPut("/groups/{id}", async (int id, Group input, AppDbContext db) => {
     var item = await db.Groups.FindAsync(id);
     if (item == null) return Results.NotFound();
     item.Group_Name = input.Group_Name;
     item.Id_UP = input.Id_UP;
+    item.Admission_Year = input.Admission_Year;
+    item.Education_Form = input.Education_Form;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/discipline-cycles/{id}", async (int id, DisciplineCycle input, AppDbContext db) => {
+    var item = await db.DisciplineCycles.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.Full_Cycle_Name = input.Full_Cycle_Name;
+    item.Short_Cycle_Name = input.Short_Cycle_Name;
+    item.Discipline_Group = input.Discipline_Group;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/disciplines/{id}", async (int id, Discipline input, AppDbContext db) => {
+    var item = await db.Disciplines.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.Full_Discipline_Name = input.Full_Discipline_Name;
+    item.Short_Discipline_Name = input.Short_Discipline_Name;
+    item.PCK_Id = input.PCK_Id;
+    item.Cycle_Id = input.Cycle_Id;
+    item.Practice_Type = input.Practice_Type;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/curriculum-load/{id}", async (int id, CurriculumLoad input, AppDbContext db) => {
+    var item = await db.CurriculumLoads.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.UP_Id = input.UP_Id;
+    item.Discipline_Id = input.Discipline_Id;
+    item.Semester = input.Semester;
+    item.Total_Hours = input.Total_Hours;
+    item.Subgroup_Number = input.Subgroup_Number;
+    item.Lectures = input.Lectures;
+    item.Lab_Works = input.Lab_Works;
+    item.Practice_Works = input.Practice_Works;
+    item.Consultations = input.Consultations;
+    item.Is_Credit = input.Is_Credit;
+    item.Is_Diff_Credit = input.Is_Diff_Credit;
+    item.Is_Exam = input.Is_Exam;
+    item.Is_Complex_Exam = input.Is_Complex_Exam;
+    item.Is_Control_Work = input.Is_Control_Work;
+    item.Is_Course_Work = input.Is_Course_Work;
+    item.Course_Work_Defense = input.Course_Work_Defense;
+    item.Temp = input.Temp;
     await db.SaveChangesAsync();
     return Results.NoContent();
 });
@@ -188,17 +315,52 @@ app.MapPut("/teachers/{id}", async (int id, TeacherDto input, AppDbContext db) =
     item.Position_Id = input.Position_Id;
     item.Degree_Id = input.Degree_Id;
     item.Employment_Id = input.Employment_Id;
+    item.KN_Number = input.KN_Number;
+    item.Category = input.Category;
+    item.Has_Higher_Education = input.Has_Higher_Education;
     await db.SaveChangesAsync();
     return Results.NoContent();
 });
 
-app.MapPut("/disciplines/{id}", async (int id, Discipline input, AppDbContext db) => {
-    var item = await db.Disciplines.FindAsync(id);
+app.MapPut("/academic-years/{id}", async (int id, AcademicYear input, AppDbContext db) => {
+    var item = await db.AcademicYears.FindAsync(id);
     if (item == null) return Results.NotFound();
-    item.Full_Discipline_Name = input.Full_Discipline_Name;
-    item.Short_Discipline_Name = input.Short_Discipline_Name;
-    item.Cycle_Id = input.Cycle_Id;
-    item.PCK_Id = input.PCK_Id;
+    item.Start_Year = input.Start_Year;
+    item.Can_Edit = input.Can_Edit;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/group-academic-years/{id}", async (int id, GroupAcademicYear input, AppDbContext db) => {
+    var item = await db.GroupAcademicYears.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.Group_Id = input.Group_Id;
+    item.AcademicYear_Id = input.AcademicYear_Id;
+    item.Budget_Students = input.Budget_Students;
+    item.Contract_Students = input.Contract_Students;
+    item.First_Subgroup_Count = input.First_Subgroup_Count;
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPut("/actual-load/{id}", async (int id, ActualLoad input, AppDbContext db) => {
+    var item = await db.ActualLoads.FindAsync(id);
+    if (item == null) return Results.NotFound();
+    item.Load_UP_Id = input.Load_UP_Id;
+    item.Group_Id = input.Group_Id;
+    item.Teacher_Id = input.Teacher_Id;
+    item.Lectures = input.Lectures;
+    item.Lab_Works = input.Lab_Works;
+    item.Practice_Works = input.Practice_Works;
+    item.Consultations = input.Consultations;
+    item.Credit = input.Credit;
+    item.Diff_Credit = input.Diff_Credit;
+    item.Exam = input.Exam;
+    item.Complex_Exam = input.Complex_Exam;
+    item.Control_Work = input.Control_Work;
+    item.Course_Work = input.Course_Work;
+    item.Course_Work_Defense = input.Course_Work_Defense;
+    item.Is_Approved = input.Is_Approved;
     await db.SaveChangesAsync();
     return Results.NoContent();
 });
@@ -231,6 +393,46 @@ app.MapDelete("/{table}/{id}", async (string table, string id, AppDbContext db) 
             var discipline = await db.Disciplines.FindAsync(int.Parse(id));
             if (discipline != null) db.Disciplines.Remove(discipline);
             break;
+        case "specialties":
+            var specialty = await db.Specialties.FindAsync(int.Parse(id));
+            if (specialty != null) db.Specialties.Remove(specialty);
+            break;
+        case "curriculums":
+            var curriculum = await db.Curriculums.FindAsync(int.Parse(id));
+            if (curriculum != null) db.Curriculums.Remove(curriculum);
+            break;
+        case "positions":
+            var position = await db.Positions.FindAsync(int.Parse(id));
+            if (position != null) db.Positions.Remove(position);
+            break;
+        case "degrees":
+            var degree = await db.Degrees.FindAsync(int.Parse(id));
+            if (degree != null) db.Degrees.Remove(degree);
+            break;
+        case "employments":
+            var employment = await db.Employments.FindAsync(int.Parse(id));
+            if (employment != null) db.Employments.Remove(employment);
+            break;
+        case "discipline-cycles":
+            var cycle = await db.DisciplineCycles.FindAsync(int.Parse(id));
+            if (cycle != null) db.DisciplineCycles.Remove(cycle);
+            break;
+        case "curriculum-load":
+            var load = await db.CurriculumLoads.FindAsync(int.Parse(id));
+            if (load != null) db.CurriculumLoads.Remove(load);
+            break;
+        case "academic-years":
+            var year = await db.AcademicYears.FindAsync(int.Parse(id));
+            if (year != null) db.AcademicYears.Remove(year);
+            break;
+        case "group-academic-years":
+            var groupYear = await db.GroupAcademicYears.FindAsync(int.Parse(id));
+            if (groupYear != null) db.GroupAcademicYears.Remove(groupYear);
+            break;
+        case "actual-load":
+            var actual = await db.ActualLoads.FindAsync(int.Parse(id));
+            if (actual != null) db.ActualLoads.Remove(actual);
+            break;
     }
     await db.SaveChangesAsync();
     return Results.NoContent();
@@ -238,7 +440,7 @@ app.MapDelete("/{table}/{id}", async (string table, string id, AppDbContext db) 
 
 app.Run();
 
-// ==================== МОДЕЛИ ДАННЫХ (ПРАВИЛЬНЫЕ НАЗВАНИЯ) ====================
+// ==================== МОДЕЛИ ДАННЫХ ====================
 
 [Table("Roles")]
 public class Role
@@ -257,6 +459,22 @@ public class User
     public int Role_Id { get; set; }
     public int? Pck_Id { get; set; }
     public Guid? CreatedBy { get; set; }
+}
+
+public class UserCreateDto
+{
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
+    public int Role_Id { get; set; }
+    public int? Pck_Id { get; set; }
+    public Guid? CreatedBy { get; set; }
+}
+
+public class UserUpdateDto
+{
+    public string Username { get; set; } = "";
+    public int Role_Id { get; set; }
+    public int? Pck_Id { get; set; }
 }
 
 [Table("PCK")]
@@ -359,6 +577,7 @@ public class CurriculumLoad
     public bool? Is_Control_Work { get; set; }
     public bool? Is_Course_Work { get; set; }
     public int? Course_Work_Defense { get; set; }
+    public int? Temp { get; set; }
 }
 
 [Table("Teachers")]
@@ -424,6 +643,9 @@ public class TeacherDto
     public int? Position_Id { get; set; }
     public int? Degree_Id { get; set; }
     public int? Employment_Id { get; set; }
+    public int? KN_Number { get; set; }
+    public string? Category { get; set; }
+    public bool? Has_Higher_Education { get; set; }
 }
 
 public class AppDbContext : DbContext

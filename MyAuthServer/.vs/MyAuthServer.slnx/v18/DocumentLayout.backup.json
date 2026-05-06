@@ -34,8 +34,7 @@
               "RelativeToolTip": "MyAuthServer\\MyAuthServer.csproj",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAA0AAAAOAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
-              "WhenOpened": "2026-05-01T10:28:07.35Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-05-01T10:28:07.35Z"
             },
             {
               "$type": "Document",
@@ -47,8 +46,7 @@
               "RelativeToolTip": "MyAuthServer\\appsettings.json",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2026-05-01T10:26:41.496Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-05-01T10:26:41.496Z"
             },
             {
               "$type": "Document",
@@ -56,9 +54,9 @@
               "Title": "Program.cs",
               "DocumentMoniker": "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\Program.cs",
               "RelativeDocumentMoniker": "MyAuthServer\\Program.cs",
-              "ToolTip": "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\Program.cs",
-              "RelativeToolTip": "MyAuthServer\\Program.cs",
-              "ViewState": "AgIAALQBAAAAAAAAAAA6wL8BAAABAAAAAAAAAA==",
+              "ToolTip": "C:\\Users\\Mr.DragonShot\\Desktop\\Programs the diplom\\909\\Project_one\\MyAuthServer\\MyAuthServer\\Program.cs*",
+              "RelativeToolTip": "MyAuthServer\\Program.cs*",
+              "ViewState": "AgIAAJICAAAAAAAAAAA6wJgCAAA9AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-04-30T13:32:39.843Z",
               "EditorCaption": ""
