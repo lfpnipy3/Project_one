@@ -16,7 +16,6 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 var app = builder.Build();
 app.UseCors("AllowAll");
 
-// КЛЮЧ ДЛЯ ШИФРОВАНИЯ ФИО
 byte[] key = Encoding.UTF8.GetBytes("A67890B234567890C1234567890D1234");
 
 byte[] EncryptFio(string text)
@@ -41,7 +40,6 @@ string DecryptFio(byte[] data)
     return Encoding.UTF8.GetString(result);
 }
 
-// ВСПОМОГАТЕЛЬНЫЙ МЕТОД ДЛЯ ХЕШИРОВАНИЯ ПАРОЛЯ
 async Task<(string hash, string salt)> HashPassword(string password)
 {
     var salt = RandomNumberGenerator.GetBytes(16);
@@ -100,7 +98,7 @@ app.MapGet("/teachers", async (AppDbContext db) => {
         t.Id_Teacher,
         Fio = DecryptFio(t.Fio),
         t.User_Id,
-        t.PCK_Id,
+        PCK_Id = t.PCK_Id,
         t.Position_Id,
         t.Degree_Id,
         t.Employment_Id,
@@ -118,7 +116,6 @@ app.MapPost("/roles", async (Role item, AppDbContext db) => { db.Roles.Add(item)
 
 app.MapPost("/users", async (UserCreateDto dto, AppDbContext db) => {
     var (hash, salt) = await HashPassword(dto.Password);
-
     var user = new User
     {
         Username = dto.Username,
@@ -128,13 +125,42 @@ app.MapPost("/users", async (UserCreateDto dto, AppDbContext db) => {
         Pck_Id = dto.Pck_Id,
         CreatedBy = dto.CreatedBy
     };
-
     db.Users.Add(user);
     await db.SaveChangesAsync();
+
+    // Если пользователь - заведующий отделением (role_Id = 2) и указан ПЦК
+    if (dto.Role_Id == 2 && dto.Pck_Id.HasValue)
+    {
+        var relatedPck = await db.PCKs.FindAsync(dto.Pck_Id.Value);
+        if (relatedPck != null && relatedPck.Manager_Id != user.Id)
+        {
+            relatedPck.Manager_Id = user.Id;
+            await db.SaveChangesAsync();
+        }
+    }
+
     return Results.Ok(new { user.Id, user.Username, user.Role_Id, user.Pck_Id, user.CreatedBy });
 });
 
-app.MapPost("/pck", async (PCK item, AppDbContext db) => { db.PCKs.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
+app.MapPost("/pck", async (PCK item, AppDbContext db) =>
+{
+    db.PCKs.Add(item);
+    await db.SaveChangesAsync();
+
+    // Если указан руководитель, обновляем его связь с ПЦК
+    if (item.Manager_Id.HasValue)
+    {
+        var managerUser = await db.Users.FindAsync(item.Manager_Id.Value);
+        if (managerUser != null)
+        {
+            managerUser.Pck_Id = item.Id_PCK;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    return Results.Ok(item);
+});
+
 app.MapPost("/positions", async (Position item, AppDbContext db) => { db.Positions.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
 app.MapPost("/degrees", async (Degree item, AppDbContext db) => { db.Degrees.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
 app.MapPost("/employments", async (Employment item, AppDbContext db) => { db.Employments.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
@@ -145,9 +171,27 @@ app.MapPost("/discipline-cycles", async (DisciplineCycle item, AppDbContext db) 
 app.MapPost("/disciplines", async (Discipline item, AppDbContext db) => { db.Disciplines.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
 app.MapPost("/curriculum-load", async (CurriculumLoad item, AppDbContext db) => { db.CurriculumLoads.Add(item); await db.SaveChangesAsync(); return Results.Ok(item); });
 app.MapPost("/teachers", async (TeacherDto dto, AppDbContext db) => {
+    Guid userId = dto.User_Id;
+    if (userId == Guid.Empty)
+    {
+        var (hash, salt) = await HashPassword("default123");
+        var newUser = new User
+        {
+            Username = $"teacher_{DateTime.Now.Ticks}",
+            PasswordHash = hash,
+            Salt = salt,
+            Role_Id = 3,
+            Pck_Id = dto.Pck_Id,
+            CreatedBy = dto.CreatedBy
+        };
+        db.Users.Add(newUser);
+        await db.SaveChangesAsync();
+        userId = newUser.Id;
+    }
+
     var teacher = new Teacher
     {
-        User_Id = dto.User_Id,
+        User_Id = userId,
         PCK_Id = dto.Pck_Id,
         Fio = EncryptFio(dto.Fio),
         Position_Id = dto.Position_Id,
@@ -177,10 +221,42 @@ app.MapPut("/roles/{id}", async (int id, Role input, AppDbContext db) => {
 app.MapPut("/users/{id}", async (Guid id, UserUpdateDto input, AppDbContext db) => {
     var item = await db.Users.FindAsync(id);
     if (item == null) return Results.NotFound();
+
+    var oldRoleId = item.Role_Id;
+    var oldPckId = item.Pck_Id;
+    var newPckId = input.Pck_Id;
+
     item.Username = input.Username;
     item.Role_Id = input.Role_Id;
     item.Pck_Id = input.Pck_Id;
     await db.SaveChangesAsync();
+
+    // Обработка связей с ПЦК для заведующего отделением (role_Id = 2)
+    if (oldRoleId == 2 || input.Role_Id == 2)
+    {
+        // Если был заведующим и у него был ПЦК, убираем его оттуда как руководителя
+        if (oldRoleId == 2 && oldPckId.HasValue && (input.Role_Id != 2 || oldPckId != newPckId))
+        {
+            var oldUserPck = await db.PCKs.FindAsync(oldPckId.Value);
+            if (oldUserPck != null && oldUserPck.Manager_Id == id)
+            {
+                oldUserPck.Manager_Id = null;
+                await db.SaveChangesAsync();
+            }
+        }
+
+        // Если стал заведующим и привязан к ПЦК, назначаем его руководителем
+        if (input.Role_Id == 2 && newPckId.HasValue)
+        {
+            var newUserPck = await db.PCKs.FindAsync(newPckId.Value);
+            if (newUserPck != null && newUserPck.Manager_Id != id)
+            {
+                newUserPck.Manager_Id = id;
+                await db.SaveChangesAsync();
+            }
+        }
+    }
+
     return Results.NoContent();
 });
 
@@ -197,10 +273,41 @@ app.MapPut("/users/{id}/password", async (Guid id, string newPassword, AppDbCont
 app.MapPut("/pck/{id}", async (int id, PCK input, AppDbContext db) => {
     var item = await db.PCKs.FindAsync(id);
     if (item == null) return Results.NotFound();
+
+    var oldManagerId = item.Manager_Id;
+    var newManagerId = input.Manager_Id;
+
     item.Full_PCK_Name = input.Full_PCK_Name;
     item.Short_PCK_Name = input.Short_PCK_Name;
     item.Manager_Id = input.Manager_Id;
     await db.SaveChangesAsync();
+
+    // Если руководитель изменился, обновляем связи
+    if (oldManagerId != newManagerId)
+    {
+        // У старого руководителя убираем связь с ПЦК
+        if (oldManagerId.HasValue)
+        {
+            var oldManagerUser = await db.Users.FindAsync(oldManagerId.Value);
+            if (oldManagerUser != null && oldManagerUser.Pck_Id == id)
+            {
+                oldManagerUser.Pck_Id = null;
+                await db.SaveChangesAsync();
+            }
+        }
+
+        // У нового руководителя устанавливаем связь с ПЦК
+        if (newManagerId.HasValue)
+        {
+            var newManagerUser = await db.Users.FindAsync(newManagerId.Value);
+            if (newManagerUser != null)
+            {
+                newManagerUser.Pck_Id = id;
+                await db.SaveChangesAsync();
+            }
+        }
+    }
+
     return Results.NoContent();
 });
 
@@ -373,62 +480,103 @@ app.MapDelete("/{table}/{id}", async (string table, string id, AppDbContext db) 
             var role = await db.Roles.FindAsync(int.Parse(id));
             if (role != null) db.Roles.Remove(role);
             break;
+
         case "users":
             var user = await db.Users.FindAsync(Guid.Parse(id));
-            if (user != null) db.Users.Remove(user);
+            if (user != null)
+            {
+                // Если удаляемый пользователь - руководитель ПЦК, очищаем связь
+                if (user.Role_Id == 2 && user.Pck_Id.HasValue)
+                {
+                    var userRelatedPck = await db.PCKs.FindAsync(user.Pck_Id.Value);
+                    if (userRelatedPck != null && userRelatedPck.Manager_Id == user.Id)
+                    {
+                        userRelatedPck.Manager_Id = null;
+                        await db.SaveChangesAsync();
+                    }
+                }
+                db.Users.Remove(user);
+            }
             break;
+
         case "groups":
             var group = await db.Groups.FindAsync(int.Parse(id));
             if (group != null) db.Groups.Remove(group);
             break;
+
         case "teachers":
             var teacher = await db.Teachers.FindAsync(int.Parse(id));
             if (teacher != null) db.Teachers.Remove(teacher);
             break;
+
         case "pck":
-            var pck = await db.PCKs.FindAsync(int.Parse(id));
-            if (pck != null) db.PCKs.Remove(pck);
+            var targetPck = await db.PCKs.FindAsync(int.Parse(id));
+            if (targetPck != null)
+            {
+                // Очищаем связь у руководителя
+                if (targetPck.Manager_Id.HasValue)
+                {
+                    var pckManager = await db.Users.FindAsync(targetPck.Manager_Id.Value);
+                    if (pckManager != null && pckManager.Pck_Id == targetPck.Id_PCK)
+                    {
+                        pckManager.Pck_Id = null;
+                        await db.SaveChangesAsync();
+                    }
+                }
+                db.PCKs.Remove(targetPck);
+            }
             break;
+
         case "disciplines":
             var discipline = await db.Disciplines.FindAsync(int.Parse(id));
             if (discipline != null) db.Disciplines.Remove(discipline);
             break;
+
         case "specialties":
             var specialty = await db.Specialties.FindAsync(int.Parse(id));
             if (specialty != null) db.Specialties.Remove(specialty);
             break;
+
         case "curriculums":
             var curriculum = await db.Curriculums.FindAsync(int.Parse(id));
             if (curriculum != null) db.Curriculums.Remove(curriculum);
             break;
+
         case "positions":
             var position = await db.Positions.FindAsync(int.Parse(id));
             if (position != null) db.Positions.Remove(position);
             break;
+
         case "degrees":
             var degree = await db.Degrees.FindAsync(int.Parse(id));
             if (degree != null) db.Degrees.Remove(degree);
             break;
+
         case "employments":
             var employment = await db.Employments.FindAsync(int.Parse(id));
             if (employment != null) db.Employments.Remove(employment);
             break;
+
         case "discipline-cycles":
             var cycle = await db.DisciplineCycles.FindAsync(int.Parse(id));
             if (cycle != null) db.DisciplineCycles.Remove(cycle);
             break;
+
         case "curriculum-load":
             var load = await db.CurriculumLoads.FindAsync(int.Parse(id));
             if (load != null) db.CurriculumLoads.Remove(load);
             break;
+
         case "academic-years":
             var year = await db.AcademicYears.FindAsync(int.Parse(id));
             if (year != null) db.AcademicYears.Remove(year);
             break;
+
         case "group-academic-years":
             var groupYear = await db.GroupAcademicYears.FindAsync(int.Parse(id));
             if (groupYear != null) db.GroupAcademicYears.Remove(groupYear);
             break;
+
         case "actual-load":
             var actual = await db.ActualLoads.FindAsync(int.Parse(id));
             if (actual != null) db.ActualLoads.Remove(actual);
@@ -565,18 +713,18 @@ public class CurriculumLoad
     public int Discipline_Id { get; set; }
     public int Semester { get; set; }
     public int? Total_Hours { get; set; }
-    public int? Subgroup_Number { get; set; }
-    public int? Lectures { get; set; }
-    public int? Lab_Works { get; set; }
-    public int? Practice_Works { get; set; }
-    public int? Consultations { get; set; }
-    public bool? Is_Credit { get; set; }
-    public bool? Is_Diff_Credit { get; set; }
-    public bool? Is_Exam { get; set; }
-    public bool? Is_Complex_Exam { get; set; }
-    public bool? Is_Control_Work { get; set; }
-    public bool? Is_Course_Work { get; set; }
-    public int? Course_Work_Defense { get; set; }
+    public int? Subgroup_Number { get; set; } = 1;
+    public int? Lectures { get; set; } = 0;
+    public int? Lab_Works { get; set; } = 0;
+    public int? Practice_Works { get; set; } = 0;
+    public int? Consultations { get; set; } = 0;
+    public bool? Is_Credit { get; set; } = false;
+    public bool? Is_Diff_Credit { get; set; } = false;
+    public bool? Is_Exam { get; set; } = false;
+    public bool? Is_Complex_Exam { get; set; } = false;
+    public bool? Is_Control_Work { get; set; } = false;
+    public bool? Is_Course_Work { get; set; } = false;
+    public int? Course_Work_Defense { get; set; } = 0;
     public int? Temp { get; set; }
 }
 
@@ -592,7 +740,7 @@ public class Teacher
     public int? Position_Id { get; set; }
     public int? Employment_Id { get; set; }
     public int PCK_Id { get; set; }
-    public bool? Has_Higher_Education { get; set; }
+    public bool? Has_Higher_Education { get; set; } = false;
 }
 
 [Table("AcademicYears")]
@@ -600,7 +748,7 @@ public class AcademicYear
 {
     [Key] public int Id_AcademicYear { get; set; }
     public int Start_Year { get; set; }
-    public bool? Can_Edit { get; set; }
+    public bool? Can_Edit { get; set; } = true;
 }
 
 [Table("Group_AcademicYears")]
@@ -609,9 +757,9 @@ public class GroupAcademicYear
     [Key] public int Id_Group_AcademicYear { get; set; }
     public int Group_Id { get; set; }
     public int AcademicYear_Id { get; set; }
-    public int? Budget_Students { get; set; }
-    public int? Contract_Students { get; set; }
-    public int? First_Subgroup_Count { get; set; }
+    public int? Budget_Students { get; set; } = 0;
+    public int? Contract_Students { get; set; } = 0;
+    public int? First_Subgroup_Count { get; set; } = 0;
 }
 
 [Table("ActualLoad")]
@@ -621,18 +769,18 @@ public class ActualLoad
     public int Load_UP_Id { get; set; }
     public int Group_Id { get; set; }
     public int Teacher_Id { get; set; }
-    public decimal? Lectures { get; set; }
-    public decimal? Lab_Works { get; set; }
-    public decimal? Practice_Works { get; set; }
-    public decimal? Consultations { get; set; }
-    public decimal? Credit { get; set; }
-    public decimal? Diff_Credit { get; set; }
-    public decimal? Exam { get; set; }
-    public decimal? Complex_Exam { get; set; }
-    public decimal? Control_Work { get; set; }
-    public decimal? Course_Work { get; set; }
-    public decimal? Course_Work_Defense { get; set; }
-    public bool? Is_Approved { get; set; }
+    public decimal? Lectures { get; set; } = 0;
+    public decimal? Lab_Works { get; set; } = 0;
+    public decimal? Practice_Works { get; set; } = 0;
+    public decimal? Consultations { get; set; } = 0;
+    public decimal? Credit { get; set; } = 0;
+    public decimal? Diff_Credit { get; set; } = 0;
+    public decimal? Exam { get; set; } = 0;
+    public decimal? Complex_Exam { get; set; } = 0;
+    public decimal? Control_Work { get; set; } = 0;
+    public decimal? Course_Work { get; set; } = 0;
+    public decimal? Course_Work_Defense { get; set; } = 0;
+    public bool? Is_Approved { get; set; } = false;
 }
 
 public class TeacherDto
@@ -646,6 +794,7 @@ public class TeacherDto
     public int? KN_Number { get; set; }
     public string? Category { get; set; }
     public bool? Has_Higher_Education { get; set; }
+    public Guid? CreatedBy { get; set; }
 }
 
 public class AppDbContext : DbContext
